@@ -1,10 +1,14 @@
+import os
 import matplotlib.pyplot as plt
-import requests
+import torch
+
 
 from PIL import Image
-from transformers import pipeline
+from transformers import GroundingDinoProcessor, GroundingDinoForObjectDetection
 
-PROMPT = "a cat. a remote control"
+
+# PROMPT = "a cat."
+PROMPT = "a barbell plate."
 # colors for visualization
 COLORS = [
     [0.000, 0.447, 0.741],
@@ -14,6 +18,10 @@ COLORS = [
     [0.466, 0.674, 0.188],
     [0.301, 0.745, 0.933],
 ]
+
+IMAGE_PATH = "assets/snatch_photo.png"
+# IMAGE_PATH = "http://images.cocodataset.org/val2017/000000039769.jpg"
+assert os.path.exists(IMAGE_PATH)
 
 
 def plot_results(pil_img, scores, labels, boxes):
@@ -31,24 +39,25 @@ def plot_results(pil_img, scores, labels, boxes):
     plt.show()
 
 
-pipe = pipeline(task="zero-shot-object-detection", model="IDEA-Research/grounding-dino-tiny")
+if __name__ == "__main__":
 
-results = pipe(
-    "http://images.cocodataset.org/val2017/000000039769.jpg",
-    candidate_labels=[PROMPT],
-    threshold=0.3,
-)
+    processor = GroundingDinoProcessor.from_pretrained("IDEA-Research/grounding-dino-tiny")
+    model = GroundingDinoForObjectDetection.from_pretrained("IDEA-Research/grounding-dino-tiny")
 
-print(results)
+    # image = Image.open(requests.get(IMAGE_PATH, stream=True).raw)
+    image = Image.open(IMAGE_PATH).convert("RGB")
+    inputs = processor(images=image, text=PROMPT, return_tensors="pt")
 
-image_url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-image = Image.open(requests.get(image_url, stream=True).raw)
+    with torch.no_grad():
+        outputs = model(**inputs)
 
-
-scores, labels, boxes = [], [], []
-for result in results:
-    scores.append(result["score"])
-    labels.append(result["label"])
-    boxes.append(tuple(result["box"].values()))
-
-plot_results(image, scores, labels, boxes)
+    width, height = image.size
+    postprocessed_outputs = processor.post_process_grounded_object_detection(
+        outputs,
+        input_ids=inputs.input_ids,
+        target_sizes=[(height, width)],
+        box_threshold=0.3,
+        text_threshold=0.1,
+    )
+    results = postprocessed_outputs[0]
+    plot_results(image, results["scores"], results["labels"], results["boxes"])
