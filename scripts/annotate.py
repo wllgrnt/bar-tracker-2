@@ -1,58 +1,54 @@
-import cv2
+import matplotlib.pyplot as plt
+import requests
 
-# import numpy as np
-import torch
-from transformers import SamModel, SamProcessor
+from PIL import Image
+from transformers import pipeline
+
+PROMPT = "a cat. a remote control"
+# colors for visualization
+COLORS = [
+    [0.000, 0.447, 0.741],
+    [0.850, 0.325, 0.098],
+    [0.929, 0.694, 0.125],
+    [0.494, 0.184, 0.556],
+    [0.466, 0.674, 0.188],
+    [0.301, 0.745, 0.933],
+]
 
 
-# Load SAM model and processor from Hugging Face
-model = SamModel.from_pretrained("facebook/sam-vit-large")
-processor = SamProcessor.from_pretrained("facebook/sam-vit-large")
-# Open the video file
-video_path = "../assets.snatch.mp4"
-cap = cv2.VideoCapture(video_path)
+def plot_results(pil_img, scores, labels, boxes):
+    plt.figure(figsize=(16, 10))
+    plt.imshow(pil_img)
+    ax = plt.gca()
+    colors = COLORS * 100
+    for score, label, (xmin, ymin, xmax, ymax), c in zip(scores, labels, boxes, colors):
+        ax.add_patch(
+            plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, fill=False, color=c, linewidth=3)
+        )
+        label = f"{PROMPT}: {score:0.2f}"
+        ax.text(xmin, ymin, label, fontsize=15, bbox=dict(facecolor="yellow", alpha=0.5))
+    plt.axis("off")
+    plt.show()
 
-# List to store barbell positions
-barbell_positions = []
 
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
+pipe = pipeline(task="zero-shot-object-detection", model="IDEA-Research/grounding-dino-tiny")
 
-    # Preprocess the frame
-    inputs = processor(images=frame, return_tensors="pt").to(
-        torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    )
+results = pipe(
+    "http://images.cocodataset.org/val2017/000000039769.jpg",
+    candidate_labels=[PROMPT],
+    threshold=0.3,
+)
 
-    # Get the segmentation masks
-    with torch.no_grad():
-        outputs = model(**inputs)
+print(results)
 
-    # Assuming the barbell is the largest segmented object in the frame
-    mask = outputs.logits.argmax(dim=1)[0].cpu().numpy()
+image_url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+image = Image.open(requests.get(image_url, stream=True).raw)
 
-    # Find contours
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    if contours:
-        # Assume the largest contour is the barbell
-        largest_contour = max(contours, key=cv2.contourArea)
-        M = cv2.moments(largest_contour)
+scores, labels, boxes = [], [], []
+for result in results:
+    scores.append(result["score"])
+    labels.append(result["label"])
+    boxes.append(tuple(result["box"].values()))
 
-        if M["m00"] != 0:
-            # Calculate the center of the barbell
-            cX = int(M["m10"] / M["m00"])
-            cY = int(M["m01"] / M["m00"])
-            barbell_positions.append((cX, cY))
-
-    # Optional: Display the frame with the tracked path
-    for pos in barbell_positions:
-        cv2.circle(frame, pos, 5, (0, 255, 0), -1)
-
-    cv2.imshow("Barbell Tracker", frame)
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
+plot_results(image, scores, labels, boxes)
