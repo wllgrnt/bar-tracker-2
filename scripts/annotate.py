@@ -8,7 +8,7 @@ from transformers import GroundingDinoProcessor, GroundingDinoForObjectDetection
 
 
 # PROMPT = "a cat."
-PROMPT = "a barbell plate."
+PROMPT = "a round weight."
 # colors for visualization
 COLORS = [
     [0.000, 0.447, 0.741],
