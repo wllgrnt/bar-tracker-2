@@ -1,6 +1,5 @@
 import os
 import cv2
-import matplotlib.pyplot as plt
 import torch
 from PIL import Image
 from transformers import GroundingDinoProcessor, GroundingDinoForObjectDetection
@@ -16,22 +15,8 @@ COLORS = [
 ]
 
 VIDEO_PATH = "assets/snatch.mp4"
+OUTPUT_PATH = "assets/snatch_annotated.mp4"
 assert os.path.exists(VIDEO_PATH)
-
-
-def plot_results(pil_img, scores, labels, boxes):
-    plt.figure(figsize=(16, 10))
-    plt.imshow(pil_img)
-    ax = plt.gca()
-    colors = COLORS * 100
-    for score, label, (xmin, ymin, xmax, ymax), c in zip(scores, labels, boxes, colors):
-        ax.add_patch(
-            plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, fill=False, color=c, linewidth=3)
-        )
-        label = f"{PROMPT}: {score:0.2f}"
-        ax.text(xmin, ymin, label, fontsize=15, bbox=dict(facecolor="yellow", alpha=0.5))
-    plt.axis("off")
-    plt.show()
 
 
 def detect_plate_in_frame(frame, processor, model):
@@ -53,16 +38,18 @@ def detect_plate_in_frame(frame, processor, model):
     return results["boxes"]
 
 
-def track_plate(video_path, initial_box):
+def track_plate(video_path, initial_box, output_path):
     cap = cv2.VideoCapture(video_path)
-    tracker = (
-        cv2.TrackerCSRT_create()
-    )  # this is what needs -contrib-, since TrackerMIL doesn't work.
+    # this is what needs -contrib-, since TrackerMIL doesn't work.
+    tracker = cv2.TrackerCSRT_create()
     ret, frame = cap.read()
 
     if not ret:
         print("Failed to read video")
         return
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    out = cv2.VideoWriter(output_path, fourcc, 30.0, (frame.shape[1], frame.shape[0]))
 
     x_min, y_min, width, height = initial_box
     tracker.init(frame, (x_min, y_min, width, height))
@@ -76,15 +63,22 @@ def track_plate(video_path, initial_box):
         success, box = tracker.update(frame)
         if success:
             x, y, w, h = [int(v) for v in box]
-            barpath.append((x + w / 2, y + h / 2))
+            barpath.append((int(x + w / 2), int(y + h / 2)))
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.circle(frame, (x + w // 2, y + h // 2), 5, (0, 0, 255), -1)
 
+        for cx, cy in barpath:
+            cv2.circle(frame, (cx, cy), 3, (0, 0, 255), -1)
+        for i in range(1, len(barpath)):
+            cv2.line(frame, barpath[i - 1], barpath[i], (0, 0, 255), 2)
+
+        out.write(frame)
         cv2.imshow("Tracking", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     cap.release()
+    out.release()
     cv2.destroyAllWindows()
     return barpath
 
@@ -104,7 +98,7 @@ if __name__ == "__main__":
             x_min, y_min, x_max, y_max = [int(coord) for coord in initial_box]
             width, height = x_max - x_min, y_max - y_min
             initial_box = (x_min, y_min, width, height)
-            barpath = track_plate(VIDEO_PATH, initial_box)
+            barpath = track_plate(VIDEO_PATH, initial_box, OUTPUT_PATH)
 
         else:
             print("No plate detected in the first frame.")
